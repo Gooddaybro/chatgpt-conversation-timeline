@@ -1,4 +1,9 @@
 const InitialJumpUtils = globalThis.ChatGPTInitialJumpUtils;
+const TURN_SELECTOR = '[data-turn-id], [data-turn-key]';
+const USER_TURN_SELECTOR = '[data-turn="user"][data-turn-id], [data-turn-key]';
+const USER_MESSAGE_SELECTOR = '[data-chatgpt-search-unit-key$=":user"]';
+const getTurnId = element => element?.dataset?.turnId || element?.dataset?.turnKey || '';
+const findTurn = (root, id) => root.querySelector(`[data-turn-id="${CSS.escape(id)}"], [data-turn-key="${CSS.escape(id)}"]`);
 
 class TimelineManager {
     constructor() {
@@ -144,11 +149,11 @@ class TimelineManager {
     }
 
     async findCriticalElements() {
-        const firstTurn = await this.waitForElement('[data-turn-id]');
+        const firstTurn = await this.waitForElement(TURN_SELECTOR);
         if (!firstTurn) return false;
 
         // Find lowest common ancestor that contains ALL turn elements
-        const allTurns = document.querySelectorAll('[data-turn-id]');
+        const allTurns = document.querySelectorAll(TURN_SELECTOR);
         let root = firstTurn.parentElement;
         while (root && root !== document.body) {
             let allInside = true;
@@ -252,7 +257,7 @@ class TimelineManager {
         this.perfStart('recalc');
         if (!this.conversationContainer || !this.ui.timelineBar || !this.scrollContainer) return;
 
-        const userTurnElements = this.conversationContainer.querySelectorAll('[data-turn="user"]');
+        const userTurnElements = this.getUserTurnElements();
         // Reset visible window to avoid cleaning with stale indices after rebuild
         this.visibleRange = { start: 0, end: -1 };
         // If the conversation is transiently empty (branch switching), don't wipe UI immediately
@@ -277,7 +282,7 @@ class TimelineManager {
         const lastTurnOffset = measuredPositions[measuredPositions.length - 1] || firstTurnOffset;
         const contentSpan = Math.max(1, lastTurnOffset - firstTurnOffset);
         const previousRatiosById = new Map(this.markers.map(marker => [marker.id, marker.baseN ?? marker.n ?? 0]));
-        const previousRatios = turnElements.map(el => previousRatiosById.get(el.dataset.turnId));
+        const previousRatios = turnElements.map(el => previousRatiosById.get(getTurnId(el)));
         const markerRatios = InitialJumpUtils.normalizeMarkerRatios({
             positions: measuredPositions,
             previous: previousRatios,
@@ -295,9 +300,9 @@ class TimelineManager {
             let n = markerRatios[index];
             n = Math.max(0, Math.min(1, n));
             const m = {
-                id: el.dataset.turnId,
+                id: getTurnId(el),
                 element: el,
-                summary: this.resolveSummary(el),
+                summary: this.resolveSummary(el) || `第 ${index + 1} 条提问（图片或附件）`,
                 n,
                 baseN: n,
                 dotElement: null,
@@ -376,10 +381,10 @@ class TimelineManager {
 
     // Ensure our conversation/scroll containers are still current after DOM replacements
     ensureContainersUpToDate() {
-        const first = document.querySelector('[data-turn-id]');
+        const first = document.querySelector(TURN_SELECTOR);
         if (!first) return;
         // Find lowest common ancestor containing all turns (same logic as findCriticalElements)
-        const allTurns = document.querySelectorAll('[data-turn-id]');
+        const allTurns = document.querySelectorAll(TURN_SELECTOR);
         let newConv = first.parentElement;
         while (newConv && newConv !== document.body) {
             let allInside = true;
@@ -435,7 +440,7 @@ class TimelineManager {
         if (!this.intersectionObserver || !this.conversationContainer) return;
         this.intersectionObserver.disconnect();
         this.visibleUserTurns.clear();
-        const userTurns = this.conversationContainer.querySelectorAll('[data-turn="user"][data-turn-id]');
+        const userTurns = this.getUserTurnElements();
         userTurns.forEach(el => this.intersectionObserver.observe(el));
     }
 
@@ -449,7 +454,7 @@ class TimelineManager {
                     return;
                 }
                 const targetId = dot.dataset.targetTurnId;
-                const targetElement = this.conversationContainer.querySelector(`[data-turn-id="${targetId}"]`);
+                const targetElement = findTurn(this.conversationContainer, targetId);
                 if (targetElement) {
                     // Only scroll; let scroll-based computation set active to avoid double-flash
                     this.queueOrRunTimelineJump(targetId);
@@ -778,7 +783,7 @@ class TimelineManager {
     resolvePendingJumpTarget(pending = this.pendingInitialJump) {
         const targetId = String(pending?.targetId || '').trim();
         if (!targetId || !this.conversationContainer) return null;
-        const turnElement = this.conversationContainer.querySelector(`[data-turn-id="${CSS.escape(targetId)}"]`);
+        const turnElement = findTurn(this.conversationContainer, targetId);
         const targetElement = this.resolveTurnScrollAnchor(turnElement);
         if (!targetElement) return null;
         return { targetId, turnElement, targetElement };
@@ -786,6 +791,9 @@ class TimelineManager {
 
     resolveTurnScrollAnchor(turnElement) {
         if (!turnElement) return null;
+        const userBubble = turnElement.querySelector('[data-user-message-bubble]') || turnElement.querySelector(USER_MESSAGE_SELECTOR);
+        if (userBubble) return userBubble;
+        if (turnElement.dataset.turnKey) return turnElement;
         const textSelectors = [
             '.whitespace-pre-wrap',
             '[dir="auto"]',
@@ -900,7 +908,7 @@ class TimelineManager {
         const pendingTarget = this.resolvePendingJumpTarget();
         let anchorTop = pendingTarget?.targetElement ? this.getTargetScrollTop(pendingTarget.targetElement) : NaN;
         if (!Number.isFinite(anchorTop)) {
-            const probeTarget = this.markers[0]?.element || this.conversationContainer?.querySelector?.('[data-turn="user"][data-turn-id]');
+            const probeTarget = this.markers[0]?.element || this.getUserTurnElements()[0];
             anchorTop = this.getTargetScrollTop(probeTarget);
         }
         return {
@@ -1059,7 +1067,7 @@ class TimelineManager {
         this.cancelScrollCorrection();
         this.lockScrollAnchoring();
         const session = this.scrollCorrectionSession;
-        const wantedTurnId = String(options.wantedTurnId || targetElement?.closest?.('[data-turn-id]')?.dataset?.turnId || '').trim() || null;
+        const wantedTurnId = String(options.wantedTurnId || getTurnId(targetElement?.closest?.(TURN_SELECTOR)) || '').trim() || null;
         const nowBase = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         const deadline = nowBase + Math.max(400, Number(options.durationMs) || 1800);
         let stableFrames = 0;
@@ -1185,11 +1193,18 @@ class TimelineManager {
         } catch {}
     }
 
-    // Two-tier summary resolution: DOM text → summaryCache (populated by fiber bridge)
+    getUserTurnElements() {
+        if (!this.conversationContainer) return [];
+        return Array.from(this.conversationContainer.querySelectorAll(USER_TURN_SELECTOR)).filter(el =>
+            el.dataset.turn === 'user' || el.querySelector('[data-user-message-bubble]') || el.querySelector(USER_MESSAGE_SELECTOR) || this.summaryCache.has(getTurnId(el))
+        );
+    }
+
+    // Modern turns contain both roles; never use the assistant's text as a question.
     resolveSummary(el) {
-        const id = el.dataset.turnId;
-        // Priority 1: DOM text (most reliable when element is not virtualized)
-        const domText = this.normalizeText(el.textContent || '');
+        const id = getTurnId(el);
+        const userBubble = el.querySelector('[data-user-message-bubble]') || el.querySelector(USER_MESSAGE_SELECTOR);
+        const domText = this.normalizeText(userBubble?.textContent || (el.dataset.turnId ? el.textContent : '') || '');
         if (domText) { this.summaryCache.set(id, domText); return domText; }
         // Priority 2: cached value (filled by fiber bridge or previous DOM reads)
         return this.summaryCache.get(id) || '';
@@ -1992,7 +2007,7 @@ function handleUrlChange() {
 }
 
 const initialObserver = new MutationObserver(() => {
-    if (document.querySelector('[data-turn-id]')) {
+    if (document.querySelector(TURN_SELECTOR)) {
         if (isConversationRoute() && (timelineActive && providerEnabled)) { initializeTimeline(); }
         try { initialObserver.disconnect(); } catch {}
         // Create a single managed pageObserver
@@ -2020,7 +2035,7 @@ try {
         try { document.querySelector('.timeline-left-slider')?.remove(); } catch {}
         try { document.getElementById('chatgpt-timeline-tooltip')?.remove(); } catch {}
       } else {
-        if (isConversationRoute() && document.querySelector('[data-turn-id]')) {
+        if (isConversationRoute() && document.querySelector(TURN_SELECTOR)) {
           initializeTimeline();
         }
       }
@@ -2047,7 +2062,7 @@ try {
         try { document.querySelector('.timeline-left-slider')?.remove(); } catch {}
         try { document.getElementById('chatgpt-timeline-tooltip')?.remove(); } catch {}
       } else {
-        if (isConversationRoute() && document.querySelector('[data-turn-id]')) {
+        if (isConversationRoute() && document.querySelector(TURN_SELECTOR)) {
           initializeTimeline();
         }
       }

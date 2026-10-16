@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ChatGPT Conversation Timeline",
-  "version": "3.3.0",
-  "description": "Adds a navigation timeline to your ChatGPT, DeepSeek, and Gemini conversations for easy navigation.",
+  "name": "ChatGPT Conversation Timeline（本地修复）",
+  "version": "3.3.1",
+  "description": "Local compatibility fix for ChatGPT conversation navigation.",
   "action": {
     "default_popup": "popup.html",
     "default_title": "会话时间轴"
@@ -22,30 +22,24 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*"
       ],
-      "js": ["chatgpt-initial-jump-utils.js", "content-chatgpt.js"],
-      "css": ["styles-chatgpt.css"]
+      "js": [
+        "chatgpt-initial-jump-utils.js",
+        "content-chatgpt.js"
+      ],
+      "css": [
+        "styles-chatgpt.css"
+      ]
     },
     {
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*"
       ],
-      "js": ["fiber-bridge-chatgpt.js"],
+      "js": [
+        "fiber-bridge-chatgpt.js"
+      ],
       "world": "MAIN"
-    },
-    {
-      "matches": [
-        "https://chat.deepseek.com/*"
-      ],
-      "js": ["content-deepseek.js"],
-      "css": ["styles-deepseek.css"]
-    },
-    {
-      "matches": [
-        "https://gemini.google.com/*"
-      ],
-      "js": ["content-gemini.js"],
-      "css": ["styles-gemini.css"]
     }
-  ]
+  ],
+  "version_name": "3.3.1-local.20261016"
 }
