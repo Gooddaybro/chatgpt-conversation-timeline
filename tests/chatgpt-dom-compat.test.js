@@ -3,17 +3,18 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 // Exercise the real manager methods; browser integration covers DOM selection/layout.
+const observers = [];
 const context = vm.createContext({
   location: { pathname: '/c/test', href: 'https://chatgpt.com/c/test' },
   document: { body: {} },
-  MutationObserver: class { observe() {} },
+  MutationObserver: class { constructor(callback) { this.callback = callback; observers.push(this); } observe() {} disconnect() {} },
   setTimeout,
   clearTimeout,
   CSS: { escape: value => value },
   ChatGPTInitialJumpUtils: require('../extension/chatgpt-initial-jump-utils.js')
 });
 vm.runInContext(fs.readFileSync(require.resolve('../extension/content-chatgpt.js'), 'utf8') +
-  '\nglobalThis.ManagerForTest = TimelineManager;', context);
+  '\nglobalThis.ManagerForTest = TimelineManager; globalThis.ActiveTurnForTest = isActiveTurn;', context);
 
 let failures = 0;
 function run(name, fn) {
@@ -90,4 +91,37 @@ run('image-only user messages remain selectable and anchor to their user unit', 
   assert.equal(manager.resolveTurnScrollAnchor(turn), userUnit);
 });
 
+
+run('hidden cached ChatGPT workspaces never leak previous conversation entries', () => {
+  const manager = new context.ManagerForTest();
+  const hiddenWorkspace = { style: { display: 'none' }, parentElement: null };
+  const previous = { dataset: { turnKey: 'old-chat' }, parentElement: hiddenWorkspace, querySelector: () => ({ textContent: 'Old question' }) };
+  const current = { dataset: { turnKey: 'current-chat' }, parentElement: null, querySelector: () => ({ textContent: 'Current question' }) };
+  manager.conversationContainer = { querySelectorAll: () => [previous, current] };
+  assert.deepEqual(Array.from(manager.getUserTurnElements()), [current]);
+});
+
 if (failures) process.exitCode = 1;
+
+(async () => {
+  try {
+    const hidden = { style: { display: 'none' } };
+    const previous = { parentElement: hidden };
+    let turns = [previous];
+    context.document.querySelector = () => turns[0];
+    context.document.querySelectorAll = () => turns;
+    const manager = new context.ManagerForTest();
+    let settled = false;
+    const pending = manager.waitForElement('[data-turn-key]', context.ActiveTurnForTest).then(value => { settled = true; return value; });
+    await Promise.resolve();
+    assert.equal(settled, false, 'hidden cached turns must not complete initialization');
+    const current = { parentElement: null };
+    turns.push(current);
+    observers.at(-1).callback([]);
+    assert.equal(await pending, current);
+    console.log('ok - initialization waits until an active workspace arrives after hidden cached turns');
+  } catch (error) {
+    console.error(`not ok - delayed active workspace: ${error.message}`);
+    process.exitCode = 1;
+  }
+})();

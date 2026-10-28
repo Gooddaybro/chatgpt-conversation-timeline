@@ -1,3 +1,7 @@
+# seekinward compatibility branch
+
+This fork's `seekinward` branch includes the local ChatGPT DOM fix and Gemini compatibility fixes (2026-10-28, version `3.3.2`). Load `extension/` as an unpacked Chrome extension; no build or runtime dependencies are required. This branch injects only on ChatGPT and Gemini. Existing DeepSeek code is retained but not enabled or verified. Reload the extension and refresh chat tabs after updating. See the [Chinese investigation and test report](docs/GEMINI-COMPATIBILITY.md) for browser evidence and unverified scenarios. The upstream documentation follows.
+
 <p align="center">
   <img src="public/preview.png" alt="Plugin Preview">
 </p>

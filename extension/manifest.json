@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Conversation Timeline（本地修复）",
-  "version": "3.3.1",
-  "description": "Local compatibility fix for ChatGPT conversation navigation.",
+  "version": "3.3.2",
+  "description": "Conversation timeline navigation for ChatGPT and Gemini.",
   "action": {
     "default_popup": "popup.html",
     "default_title": "会话时间轴"
@@ -39,7 +39,19 @@
         "fiber-bridge-chatgpt.js"
       ],
       "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "content-gemini.js"
+      ],
+      "css": [
+        "styles-gemini.css"
+      ],
+      "run_at": "document_idle"
     }
   ],
-  "version_name": "3.3.1-local.20261016"
+  "version_name": "3.3.2-seekinward.20261028"
 }

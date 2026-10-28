@@ -2,6 +2,13 @@ const InitialJumpUtils = globalThis.ChatGPTInitialJumpUtils;
 const TURN_SELECTOR = '[data-turn-id], [data-turn-key]';
 const USER_TURN_SELECTOR = '[data-turn="user"][data-turn-id], [data-turn-key]';
 const USER_MESSAGE_SELECTOR = '[data-chatgpt-search-unit-key$=":user"]';
+// ChatGPT keeps previous workspaces mounted with display:none during SPA navigation.
+const isActiveTurn = element => {
+    for (let node = element; node; node = node.parentElement) {
+        if (node.hidden || node.inert || node.style?.display === 'none' || node.getAttribute?.('aria-hidden') === 'true') return false;
+    }
+    return true;
+};
 const getTurnId = element => element?.dataset?.turnId || element?.dataset?.turnKey || '';
 const findTurn = (root, id) => root.querySelector(`[data-turn-id="${CSS.escape(id)}"], [data-turn-key="${CSS.escape(id)}"]`);
 
@@ -149,11 +156,12 @@ class TimelineManager {
     }
 
     async findCriticalElements() {
-        const firstTurn = await this.waitForElement(TURN_SELECTOR);
+        if (!await this.waitForElement(TURN_SELECTOR, isActiveTurn)) return false;
+        const allTurns = Array.from(document.querySelectorAll(TURN_SELECTOR)).filter(isActiveTurn);
+        const firstTurn = allTurns[0];
         if (!firstTurn) return false;
 
-        // Find lowest common ancestor that contains ALL turn elements
-        const allTurns = document.querySelectorAll(TURN_SELECTOR);
+        // Find lowest common ancestor that contains all active turn elements
         let root = firstTurn.parentElement;
         while (root && root !== document.body) {
             let allInside = true;
@@ -381,10 +389,10 @@ class TimelineManager {
 
     // Ensure our conversation/scroll containers are still current after DOM replacements
     ensureContainersUpToDate() {
-        const first = document.querySelector(TURN_SELECTOR);
+        const allTurns = Array.from(document.querySelectorAll(TURN_SELECTOR)).filter(isActiveTurn);
+        const first = allTurns[0];
         if (!first) return;
-        // Find lowest common ancestor containing all turns (same logic as findCriticalElements)
-        const allTurns = document.querySelectorAll(TURN_SELECTOR);
+        // Find lowest common ancestor containing active turns (same as findCriticalElements)
         let newConv = first.parentElement;
         while (newConv && newConv !== document.body) {
             let allInside = true;
@@ -1195,7 +1203,7 @@ class TimelineManager {
 
     getUserTurnElements() {
         if (!this.conversationContainer) return [];
-        return Array.from(this.conversationContainer.querySelectorAll(USER_TURN_SELECTOR)).filter(el =>
+        return Array.from(this.conversationContainer.querySelectorAll(USER_TURN_SELECTOR)).filter(isActiveTurn).filter(el =>
             el.dataset.turn === 'user' || el.querySelector('[data-user-message-bubble]') || el.querySelector(USER_MESSAGE_SELECTOR) || this.summaryCache.has(getTurnId(el))
         );
     }
@@ -1754,20 +1762,23 @@ class TimelineManager {
         }
     }
 
-    waitForElement(selector) {
+    waitForElement(selector, predicate = () => true) {
+        const find = () => Array.from(document.querySelectorAll(selector)).find(predicate);
         return new Promise((resolve) => {
-            const element = document.querySelector(selector);
+            const element = find();
             if (element) return resolve(element);
+            let timer;
             const observer = new MutationObserver(() => {
-                const el = document.querySelector(selector);
+                const el = find();
                 if (el) {
                     try { observer.disconnect(); } catch {}
+                    clearTimeout(timer);
                     resolve(el);
                 }
             });
-            try { observer.observe(document.body, { childList: true, subtree: true }); } catch {}
+            try { observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'hidden', 'inert', 'aria-hidden'] }); } catch {}
             // Guard against long-lived observers on wrong pages
-            setTimeout(() => { try { observer.disconnect(); } catch {} resolve(null); }, 5000);
+            timer = setTimeout(() => { try { observer.disconnect(); } catch {} resolve(null); }, 5000);
         });
     }
 

@@ -4,6 +4,8 @@
 
 # 🕰️ ChatGPT 对话时间轴插件
 
+> **本 fork 的 `seekinward` 分支（2026-10-28）**：包含新版 ChatGPT DOM 修复和 Gemini 兼容修复，当前加载范围仅为 ChatGPT、Gemini。请下载本分支、在 `chrome://extensions/` 加载 `extension/`，无需构建。商店版不包含这些本地改动；DeepSeek 代码保留但未启用、未验收。更新后重新加载扩展并刷新聊天网页。详见 [中文调查与测试报告](docs/GEMINI-COMPATIBILITY.md)。以下为上游项目说明。
+
 > 🇺🇸 English version available in [here](./README.md)
 
 为你的 AI 对话添加一个交互式的时间轴。**现已同时支持 ChatGPT、DeepSeek 与 Google Gemini！**

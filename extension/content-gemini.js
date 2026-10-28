@@ -68,19 +68,29 @@
     } catch { return null; }
   }
 
-  function waitForElement(selector, timeoutMs = 5000) {
+  function waitForElement(selector, timeoutMs = 5000, signal) {
     return new Promise((resolve) => {
+      if (signal?.aborted) return resolve(null);
       const el = document.querySelector(selector);
       if (el) return resolve(el);
+      let timer = null;
+      let settled = false;
+      const finish = (element) => {
+        if (settled) return;
+        settled = true;
+        try { obs.disconnect(); } catch {}
+        if (timer !== null) clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        resolve(element);
+      };
+      const onAbort = () => finish(null);
       const obs = new MutationObserver(() => {
         const n = document.querySelector(selector);
-        if (n) {
-          try { obs.disconnect(); } catch {}
-          resolve(n);
-        }
+        if (n) finish(n);
       });
       try { obs.observe(document.body, { childList: true, subtree: true }); } catch {}
-      setTimeout(() => { try { obs.disconnect(); } catch {} resolve(null); }, timeoutMs);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      timer = setTimeout(() => finish(null), timeoutMs);
     });
   }
 
@@ -125,6 +135,8 @@
   function findConversationRootFromFirst(firstMsg) {
     if (!firstMsg) return null;
     try {
+      const history = document.querySelector(SEL_SCROLL_ALT);
+      if (history?.contains(firstMsg)) return history;
       const all = Array.from(document.querySelectorAll(SEL_USER_BUBBLE));
       let node = firstMsg.parentElement;
       while (node && node !== document.body) {
@@ -142,6 +154,8 @@
   // --- Phase 3: minimal timeline UI manager (scaffold only) ---
   class GeminiTimelineScaffold {
     constructor() {
+      this.abortController = new AbortController();
+      this.scrollAnimationId = null;
       this.conversationContainer = null;
       this.scrollContainer = null;
       this.timelineBar = null;
@@ -215,8 +229,8 @@
 
     async init() {
       // Wait until we see at least one user bubble before wiring
-      const first = await waitForElement(SEL_USER_BUBBLE, 5000);
-      if (!first) return;
+      const first = await waitForElement(SEL_USER_BUBBLE, 5000, this.abortController.signal);
+      if (!first || this.abortController.signal.aborted) return;
       // Bind conversation root & scroll container
       const root = findConversationRootFromFirst(first);
       this.conversationContainer = root || first.parentElement || document.body;
@@ -455,6 +469,19 @@
     }
 
     destroy() {
+      this.abortController.abort();
+      if (this.scrollAnimationId !== null) cancelAnimationFrame(this.scrollAnimationId);
+      this.scrollAnimationId = null;
+      try { this.intersectionObserver?.disconnect(); } catch {}
+      try { this.themeObserver?.disconnect(); } catch {}
+      try { this.resizeObserver?.disconnect(); } catch {}
+      try { window.visualViewport?.removeEventListener('resize', this.onVisualViewportResize); } catch {}
+      for (const [event, handler] of [
+        ['mouseover', this.onTimelineBarOver], ['mouseout', this.onTimelineBarOut],
+        ['focusin', this.onTimelineBarFocusIn], ['focusout', this.onTimelineBarFocusOut]
+      ]) {
+        try { this.timelineBar?.removeEventListener(event, handler); } catch {}
+      }
       // Remove listeners
       try { this.timelineBar?.removeEventListener('click', this.onTimelineBarClick); } catch {}
       try { this.timelineBar?.removeEventListener('wheel', this.onTimelineWheel); } catch {}
@@ -504,7 +531,7 @@
         if (this.rebuildTimer) { try { clearTimeout(this.rebuildTimer); } catch {} }
         this.rebuildTimer = setTimeout(() => { this.rebuildAndRefresh(); }, 250);
       });
-      try { this.mutationObserver.observe(this.conversationContainer, { childList: true, subtree: true }); } catch {}
+      try { this.mutationObserver.observe(this.conversationContainer, { childList: true, subtree: true, characterData: true }); } catch {}
     }
 
     rebuildAndRefresh() {
@@ -552,8 +579,10 @@
 
     extractUserSummary(el) {
       try {
-        const line = el.querySelector('.query-text .query-text-line');
-        if (line && line.textContent) return String(line.textContent).replace(/\s+/g, ' ').trim();
+        const text = el.querySelector('.query-text')?.cloneNode(true);
+        // Gemini repeats a shortened question in a screen-reader-only heading.
+        text?.querySelectorAll('.screen-reader-user-query-label').forEach(label => label.remove());
+        if (text && text.textContent) return String(text.textContent).replace(/\s+/g, ' ').trim();
       } catch {}
       try { return String(el.textContent || '').replace(/\s+/g, ' ').trim(); } catch { return ''; }
     }
@@ -569,7 +598,7 @@
 
     hasUserText(el) {
       try {
-        const line = el.querySelector('.query-text .query-text-line');
+        const line = el.querySelector('.query-text');
         if (line && typeof line.textContent === 'string' && line.textContent.trim().length > 0) return true;
       } catch {}
       try {
@@ -603,7 +632,13 @@
       try { this.trackContent.querySelectorAll('.timeline-dot').forEach(n => n.remove()); } catch {}
 
       const nodes = this.collectUserNodes();
-      if (nodes.length === 0) return;
+      this.visibleRange = { start: 0, end: -1 };
+      if (nodes.length === 0) {
+        this.markers = [];
+        this.markerIndexByEl.clear();
+        this.activeIdx = -1;
+        return;
+      }
 
       // Compute absolute Y relative to scroll container
       const cRect = this.scrollContainer.getBoundingClientRect();
@@ -624,7 +659,7 @@
         const y = ys[i];
         const n0 = this.clamp01((y - firstY) / span);
         let id = null;
-        try { id = el.getAttribute('data-turn-id') || null; } catch {}
+        try { id = el.getAttribute('data-turn-id') || el.closest('.conversation-container[id]')?.id || null; } catch {}
         if (!id) {
           const base = this.buildStableHashFromUser(el);
           const cnt = (seen.get(base) || 0) + 1; seen.set(base, cnt);
@@ -916,7 +951,9 @@
     }
 
     scrollToMessage(targetEl) {
-      if (!this.scrollContainer || !targetEl) return;
+      if (!this.scrollContainer || !targetEl || this.abortController.signal.aborted) return;
+      if (this.scrollAnimationId !== null) cancelAnimationFrame(this.scrollAnimationId);
+      const container = this.scrollContainer;
       const containerRect = this.scrollContainer.getBoundingClientRect();
       const targetRect = targetEl.getBoundingClientRect();
       const to = targetRect.top - containerRect.top + this.scrollContainer.scrollTop;
@@ -926,13 +963,21 @@
       let t0 = null;
       const ease = (t, b, c, d) => { t /= d/2; if (t < 1) return c/2*t*t + b; t--; return -c/2*(t*(t-2)-1)+b; };
       const step = (ts) => {
+        if (this.abortController.signal.aborted || this.scrollContainer !== container || !targetEl.isConnected) {
+          this.scrollAnimationId = null;
+          return;
+        }
         if (t0 === null) t0 = ts;
         const dt = ts - t0;
         const v = ease(dt, from, dist, dur);
         this.scrollContainer.scrollTop = v;
-        if (dt < dur) requestAnimationFrame(step); else this.scrollContainer.scrollTop = to;
+        if (dt < dur) this.scrollAnimationId = requestAnimationFrame(step);
+        else {
+          this.scrollContainer.scrollTop = to;
+          this.scrollAnimationId = null;
+        }
       };
-      requestAnimationFrame(step);
+      this.scrollAnimationId = requestAnimationFrame(step);
     }
 
     attachInteractions() {

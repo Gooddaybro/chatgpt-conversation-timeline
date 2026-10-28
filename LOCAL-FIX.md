@@ -1,4 +1,12 @@
-# 本地 ChatGPT 兼容修复
+# 本地兼容修复记录
+
+## 当前版本（2026-10-28）
+
+`seekinward` 分支现为 `3.3.2-seekinward.20261028`，在原有 ChatGPT 修复上恢复 Gemini 注入并修复动态更新。完整调查、真实浏览器测试结果与限制见 [Gemini 兼容性报告](docs/GEMINI-COMPATIBILITY.md)。当前总开关、ChatGPT、Gemini 开启，DeepSeek 关闭；扩展 ID 和本地加载目录不变。
+
+以下内容是 2026-10-16 的历史验收记录，其中版本号、站点范围与开关状态以本节及最新报告为准。
+
+## 2026-10-16 ChatGPT 修复
 
 用户于 2026-10-16 授权在单独副本中修复、安装并测试。官方源码保留在相邻的 `chatgpt-conversation-timeline` 目录。
 
